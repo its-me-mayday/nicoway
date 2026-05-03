@@ -18,3 +18,23 @@ def test_itinerary_assistant_builds_searchable_plan_from_natural_prompt():
     assert plan.draft.min_hotel_stars == 4
     assert plan.advice.hotel_strategy
     assert "Prenota" in plan.advice.booking_advice
+
+
+def test_itinerary_assistant_proposes_multiple_search_strategies():
+    proposals = ItineraryAssistant().build_proposals(
+        "Parto da Roma con Nicole per Edimburgo a fine agosto 2026, "
+        "budget 1800 euro, hotel o casa centrale romantica.",
+        today=date(2026, 5, 3),
+    )
+
+    assert [proposal.title for proposal in proposals] == [
+        "Equilibrata",
+        "Smart budget",
+        "Romantica e centrale",
+    ]
+    assert proposals[1].draft.max_budget_total < proposals[0].draft.max_budget_total
+    assert (
+        proposals[2].draft.max_hotel_price_per_night
+        > proposals[0].draft.max_hotel_price_per_night
+    )
+    assert any("casa/appartamento" in item for item in proposals[1].advice.hotel_strategy)

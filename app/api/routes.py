@@ -5,7 +5,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.application.services.deal_evaluator import DealEvaluator
-from app.application.services.itinerary_assistant import ItineraryAssistant, ItineraryPlan
+from app.application.services.itinerary_assistant import (
+    ItineraryAssistant,
+    ItineraryPlan,
+    ItineraryProposal,
+)
 from app.application.services.search_service import SearchService
 from app.config import Settings, get_settings
 from app.domain.models import TravelSearch
@@ -78,6 +82,15 @@ def serialize_plan(plan: ItineraryPlan) -> dict:
             "booking_advice": advice.booking_advice,
             "assumptions": advice.assumptions,
         },
+    }
+
+
+def serialize_proposal(proposal: ItineraryProposal, index: int) -> dict:
+    return {
+        "index": index,
+        "title": proposal.title,
+        "rationale": proposal.rationale,
+        **serialize_plan(ItineraryPlan(draft=proposal.draft, advice=proposal.advice)),
     }
 
 
@@ -213,51 +226,63 @@ async def assistant_itinerary(
     session: SessionDep,
     settings: SettingsDep,
 ) -> dict:
-    plan = ItineraryAssistant().build_plan(payload.prompt)
-    response = serialize_plan(plan)
+    assistant = ItineraryAssistant()
+    proposals = assistant.build_proposals(payload.prompt)
+    response = {
+        "proposals": [
+            serialize_proposal(proposal, index)
+            for index, proposal in enumerate(proposals)
+        ]
+    }
     if not payload.create_search:
         return response
 
-    draft = plan.draft
-    search_payload = TravelSearchCreate(
-        telegram_chat_id=payload.telegram_chat_id,
-        username=payload.username,
-        name=draft.name,
-        origin=draft.origin,
-        destination=draft.destination,
-        date_from=draft.date_from.isoformat(),
-        date_to=draft.date_to.isoformat(),
-        flexible_days=draft.flexible_days,
-        adults=draft.adults,
-        children=draft.children,
-        max_budget_total=draft.max_budget_total,
-        max_flight_price=draft.max_flight_price,
-        max_hotel_price_per_night=draft.max_hotel_price_per_night,
-        min_hotel_stars=draft.min_hotel_stars,
-        preferred_departure_time_window=draft.preferred_departure_time_window,
-        preferred_return_time_window=draft.preferred_return_time_window,
-    )
-    row = persist_search(search_payload, session, settings)
-    response["search"] = serialize_search(row)
-    if payload.run_check:
-        service = SearchService(
-            session,
-            MockFlightProvider(),
-            MockHotelProvider(),
-            DealEvaluator(settings),
-            notification_service=None,
+    activated = []
+    checks = []
+    for index, proposal in enumerate(proposals):
+        draft = proposal.draft
+        search_payload = TravelSearchCreate(
+            telegram_chat_id=payload.telegram_chat_id,
+            username=payload.username,
+            name=draft.name,
+            origin=draft.origin,
+            destination=draft.destination,
+            date_from=draft.date_from.isoformat(),
+            date_to=draft.date_to.isoformat(),
+            flexible_days=draft.flexible_days,
+            adults=draft.adults,
+            children=draft.children,
+            max_budget_total=draft.max_budget_total,
+            max_flight_price=draft.max_flight_price,
+            max_hotel_price_per_night=draft.max_hotel_price_per_night,
+            min_hotel_stars=draft.min_hotel_stars,
+            preferred_departure_time_window=draft.preferred_departure_time_window,
+            preferred_return_time_window=draft.preferred_return_time_window,
         )
-        candidate = await service.check_search(row, notify=False)
-        if candidate:
-            response["initial_check"] = {
-                "status": "checked",
-                "total_estimated_price": candidate.total_estimated_price,
-                "score": candidate.score,
-            }
-            return response
+        row = persist_search(search_payload, session, settings)
+        activated.append(serialize_search(row))
+        if payload.run_check:
+            service = SearchService(
+                session,
+                MockFlightProvider(),
+                MockHotelProvider(),
+                DealEvaluator(settings),
+                notification_service=None,
+            )
+            candidate = await service.check_search(row, notify=False)
+            checks.append(
+                {
+                    "proposal_index": index,
+                    "search_id": row.id,
+                    "status": "checked" if candidate else "no_deals",
+                    "total_estimated_price": candidate.total_estimated_price if candidate else None,
+                    "score": candidate.score if candidate else None,
+                }
+            )
 
     session.commit()
-    response["initial_check"] = {"status": "not_run" if not payload.run_check else "no_deals"}
+    response["activated_searches"] = activated
+    response["initial_checks"] = checks
     return response
 
 

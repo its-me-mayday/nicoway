@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 
 MONTHS = {
@@ -84,6 +84,14 @@ class ItineraryPlan:
     advice: ItineraryAdvice
 
 
+@dataclass(frozen=True)
+class ItineraryProposal:
+    title: str
+    rationale: str
+    draft: ItineraryDraft
+    advice: ItineraryAdvice
+
+
 class ItineraryAssistant:
     def build_plan(self, prompt: str, today: date | None = None) -> ItineraryPlan:
         today = today or date.today()
@@ -119,6 +127,76 @@ class ItineraryAssistant:
             preferred_return_time_window="16-21",
         )
         return ItineraryPlan(draft=draft, advice=self._build_advice(draft, normalized))
+
+    def build_proposals(self, prompt: str, today: date | None = None) -> list[ItineraryProposal]:
+        plan = self.build_plan(prompt, today)
+        base = plan.draft
+        normalized = prompt.lower()
+        nights = max((base.date_to - base.date_from).days, 1)
+
+        proposals = [
+            ItineraryProposal(
+                title="Equilibrata",
+                rationale=(
+                    "Buon compromesso tra orari comodi, budget e alloggio centrale. "
+                    "La attiverei come ricerca principale."
+                ),
+                draft=base,
+                advice=plan.advice,
+            )
+        ]
+
+        cheaper_start = base.date_from + timedelta(days=1 if base.flexible_days else 0)
+        cheaper_draft = replace(
+            base,
+            name=f"{base.destination} {base.date_from.year} - Smart",
+            date_from=cheaper_start,
+            date_to=cheaper_start + timedelta(days=nights),
+            flexible_days=max(base.flexible_days, 3),
+            max_budget_total=round(base.max_budget_total * 0.9, 0),
+            max_flight_price=round((base.max_flight_price or 250) * 0.85, 0),
+            max_hotel_price_per_night=round(
+                (base.max_hotel_price_per_night or 100) * 0.9,
+                0,
+            ),
+            min_hotel_stars=max(3, base.min_hotel_stars - 1),
+        )
+        proposals.append(
+            ItineraryProposal(
+                title="Smart budget",
+                rationale=(
+                    "Più aggressiva sul prezzo: accetta un po' di flessibilità e hotel/casa "
+                    "semplice ma ben posizionata."
+                ),
+                draft=cheaper_draft,
+                advice=self._build_advice(cheaper_draft, normalized + " casa appartamento budget"),
+            )
+        )
+
+        romantic_draft = replace(
+            base,
+            name=f"{base.destination} {base.date_from.year} - Romantica",
+            max_budget_total=round(base.max_budget_total * 1.12, 0),
+            max_hotel_price_per_night=round(
+                (base.max_hotel_price_per_night or 100) * 1.25,
+                0,
+            ),
+            min_hotel_stars=max(4, base.min_hotel_stars),
+            preferred_departure_time_window="08-12",
+            preferred_return_time_window="17-21",
+        )
+        proposals.append(
+            ItineraryProposal(
+                title="Romantica e centrale",
+                rationale=(
+                    "Dà priorità a quartiere, qualità dell'alloggio e orari meno stancanti. "
+                    "Utile per un viaggio di coppia."
+                ),
+                draft=romantic_draft,
+                advice=self._build_advice(romantic_draft, normalized + " romantico charme"),
+            )
+        )
+        return proposals
 
     def _extract_origin(self, text: str) -> str:
         for hint, code in AIRPORT_HINTS.items():
@@ -207,7 +285,10 @@ class ItineraryAssistant:
 
     def _build_advice(self, draft: ItineraryDraft, text: str) -> ItineraryAdvice:
         destination = draft.destination
-        hotel_tone = "boutique o guesthouse curata" if "romantico" in text else "hotel centrale"
+        wants_home = any(word in text for word in ["casa", "appartamento", "airbnb", "residence"])
+        hotel_tone = "casa/appartamento con cucina" if wants_home else "hotel centrale"
+        if "romantico" in text and not wants_home:
+            hotel_tone = "boutique o guesthouse curata"
         hotel_strategy = [
             f"Cerca un {hotel_tone} con cancellazione gratuita nelle prime 48 ore.",
             "Preferisci una zona raggiungibile a piedi la sera: riduce taxi e tempi morti.",

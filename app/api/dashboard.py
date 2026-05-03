@@ -217,8 +217,11 @@ def dashboard() -> str:
       <h2>Brief naturale</h2>
       <form id="assistantForm">
         <label>Telegram chat id<input name="telegram_chat_id" required inputmode="numeric"></label>
-        <label>Indicazioni di viaggio<textarea name="prompt" required placeholder="Vorrei partire da Roma con Nicole per Edimburgo a fine agosto 2026, 2 adulti, budget 1800 euro. Hotel centrale romantico, esperienze belle ma senza correre."></textarea></label>
-        <button class="primary" type="submit">Interpreta e attiva</button>
+        <label>Indicazioni di viaggio<textarea name="prompt" required placeholder="Vorrei partire da Roma con Nicole per Edimburgo a fine agosto 2026, 2 adulti, budget 1800 euro. Hotel o casa centrale romantica, esperienze belle ma senza correre."></textarea></label>
+        <div class="toolbar">
+          <button type="submit">Proponi</button>
+          <button class="primary" type="button" id="activateBriefBtn">Proponi e attiva</button>
+        </div>
       </form>
       <div id="assistantResult" class="assistant-result"></div>
 
@@ -396,42 +399,54 @@ def dashboard() -> str:
       }
     });
 
-    document.querySelector("#assistantForm").addEventListener("submit", async event => {
-      event.preventDefault();
-      const data = Object.fromEntries(new FormData(event.currentTarget).entries());
+    async function submitAssistant(event, activate) {
+      if (event) event.preventDefault();
+      const form = document.querySelector("#assistantForm");
+      const data = Object.fromEntries(new FormData(form).entries());
       data.telegram_chat_id = Number(data.telegram_chat_id);
-      data.create_search = true;
-      data.run_check = true;
+      data.create_search = activate;
+      data.run_check = activate;
       try {
         const result = await request("/assistant/itinerary", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(data),
         });
-        const draft = result.draft;
-        const advice = result.advice;
+        const proposals = result.proposals || [];
         assistantResultEl.style.display = "grid";
-        assistantResultEl.innerHTML = `
-          <div>
-            <h3>${escapeHtml(draft.name)}</h3>
-            <div class="meta">
-              <span>${escapeHtml(draft.origin)} → ${escapeHtml(draft.destination)}</span>
-              <span>${draft.date_from} / ${draft.date_to}</span>
-              <span>${money(draft.max_budget_total)}</span>
+        assistantResultEl.innerHTML = proposals.map(proposal => {
+          const draft = proposal.draft;
+          const advice = proposal.advice;
+          const check = (result.initial_checks || []).find(item => item.proposal_index === proposal.index);
+          return `
+            <div class="deal">
+              <div>
+                <h3>${escapeHtml(proposal.title)} · ${escapeHtml(draft.name)}</h3>
+                <div class="muted">${escapeHtml(proposal.rationale)}</div>
+                <div class="meta">
+                  <span>${escapeHtml(draft.origin)} → ${escapeHtml(draft.destination)}</span>
+                  <span>${draft.date_from} / ${draft.date_to}</span>
+                  <span>${money(draft.max_budget_total)}</span>
+                  <span>hotel/casa ${money(draft.max_hotel_price_per_night)}/notte</span>
+                </div>
+              </div>
+              <div><strong>Alloggio</strong><ul>${advice.hotel_strategy.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>
+              <div><strong>Esperienze</strong><ul>${advice.experiences.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>
+              <div><strong>Orari</strong><ul>${advice.timing.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>
+              <div><strong>Decisione</strong><div class="muted">${escapeHtml(advice.booking_advice)}</div></div>
+              ${activate && check ? `<div><strong>Check</strong><div class="muted">${check.status}${check.score ? ` · score ${Math.round(check.score)}/100 · ${money(check.total_estimated_price)}` : ""}</div></div>` : ""}
             </div>
-          </div>
-          <div><strong>Hotel</strong><ul>${advice.hotel_strategy.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>
-          <div><strong>Esperienze</strong><ul>${advice.experiences.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>
-          <div><strong>Orari</strong><ul>${advice.timing.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>
-          <div><strong>Consiglio</strong><div class="muted">${escapeHtml(advice.booking_advice)}</div></div>
-          ${result.initial_check ? `<div><strong>Primo check</strong><div class="muted">${result.initial_check.status}${result.initial_check.score ? ` · score ${Math.round(result.initial_check.score)}/100 · ${money(result.initial_check.total_estimated_price)}` : ""}</div></div>` : ""}
-        `;
-        toast("Brief interpretato e ricerca attivata.");
+          `;
+        }).join("");
+        toast(activate ? "Proposte attivate." : "Proposte generate.");
         await render();
       } catch (error) {
         toast("Errore: " + error.message);
       }
-    });
+    }
+
+    document.querySelector("#assistantForm").addEventListener("submit", event => submitAssistant(event, false));
+    document.querySelector("#activateBriefBtn").addEventListener("click", event => submitAssistant(event, true));
 
     render();
   </script>
