@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -24,7 +23,7 @@ class SchedulerService:
 
     def start(self) -> None:
         self.scheduler.add_job(
-            lambda: asyncio.create_task(self.run_once()),
+            self.run_once,
             "interval",
             minutes=1,
             id="active-searches-scan",

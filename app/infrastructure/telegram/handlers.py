@@ -62,18 +62,29 @@ def _parse_date(value: str):
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = _chat_id(update)
     with SessionLocal() as session:
-        UserRepository(session).get_or_create(_chat_id(update), _username(update))
+        UserRepository(session).get_or_create(chat_id, _username(update))
         session.commit()
     await update.message.reply_text(
         "Ciao, sono NicoWay. Tengo d'occhio voli e hotel per i vostri viaggi, "
         "e ti avviso quando spunta un deal che vale una piccola fuga insieme.\n\n"
+        f"Il tuo Telegram chat id e: {chat_id}\n\n"
         "Usa /newsearch per creare una ricerca o /help per vedere i comandi."
     )
 
 
+async def chatid(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = _chat_id(update)
+    with SessionLocal() as session:
+        UserRepository(session).get_or_create(chat_id, _username(update))
+        session.commit()
+    await update.message.reply_text(f"Il tuo Telegram chat id e: {chat_id}")
+
+
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
+        "/chatid - mostra il tuo chat id per la dashboard\n"
         "/newsearch - crea una nuova ricerca guidata\n"
         "/searches - mostra le ricerche\n"
         "/enable <id> - attiva una ricerca\n"
@@ -337,6 +348,7 @@ def build_handlers():
     )
     return [
         CommandHandler("start", start),
+        CommandHandler("chatid", chatid),
         CommandHandler("help", help_command),
         conversation,
         CommandHandler("searches", searches),
