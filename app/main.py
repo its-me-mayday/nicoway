@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.api.dashboard import router as dashboard_router
 from app.api.routes import router
 from app.application.services.scheduler_service import SchedulerService
 from app.config import get_settings
@@ -65,4 +66,5 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="NicoWay", version="0.1.0", lifespan=lifespan)
+app.include_router(dashboard_router)
 app.include_router(router)
