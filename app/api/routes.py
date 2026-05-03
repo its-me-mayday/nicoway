@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.application.services.deal_evaluator import DealEvaluator
+from app.application.services.itinerary_assistant import ItineraryAssistant, ItineraryPlan
 from app.application.services.search_service import SearchService
 from app.config import Settings, get_settings
 from app.domain.models import TravelSearch
@@ -40,6 +41,83 @@ class TravelSearchCreate(BaseModel):
     preferred_departure_time_window: str | None = "07-11"
     preferred_return_time_window: str | None = "16-21"
     check_frequency_minutes: int | None = None
+
+
+class AssistantItineraryRequest(BaseModel):
+    telegram_chat_id: int
+    prompt: str
+    username: str | None = None
+    create_search: bool = True
+    run_check: bool = True
+
+
+def serialize_plan(plan: ItineraryPlan) -> dict:
+    draft = plan.draft
+    advice = plan.advice
+    return {
+        "draft": {
+            "name": draft.name,
+            "origin": draft.origin,
+            "destination": draft.destination,
+            "date_from": draft.date_from,
+            "date_to": draft.date_to,
+            "flexible_days": draft.flexible_days,
+            "adults": draft.adults,
+            "children": draft.children,
+            "max_budget_total": draft.max_budget_total,
+            "max_flight_price": draft.max_flight_price,
+            "max_hotel_price_per_night": draft.max_hotel_price_per_night,
+            "min_hotel_stars": draft.min_hotel_stars,
+            "preferred_departure_time_window": draft.preferred_departure_time_window,
+            "preferred_return_time_window": draft.preferred_return_time_window,
+        },
+        "advice": {
+            "hotel_strategy": advice.hotel_strategy,
+            "experiences": advice.experiences,
+            "timing": advice.timing,
+            "booking_advice": advice.booking_advice,
+            "assumptions": advice.assumptions,
+        },
+    }
+
+
+def persist_search(
+    payload: TravelSearchCreate,
+    session: Session,
+    settings: Settings,
+):
+    from datetime import date
+    from decimal import Decimal
+
+    user = UserRepository(session).get_or_create(payload.telegram_chat_id, payload.username)
+    return TravelSearchRepository(session).add(
+        TravelSearch(
+            id=None,
+            user_id=user.id,
+            name=payload.name,
+            origin=payload.origin.upper(),
+            destination=payload.destination,
+            date_from=date.fromisoformat(payload.date_from),
+            date_to=date.fromisoformat(payload.date_to),
+            flexible_days=payload.flexible_days,
+            adults=payload.adults,
+            children=payload.children,
+            max_budget_total=Decimal(str(payload.max_budget_total)),
+            max_flight_price=Decimal(str(payload.max_flight_price))
+            if payload.max_flight_price is not None
+            else None,
+            max_hotel_price_per_night=Decimal(str(payload.max_hotel_price_per_night))
+            if payload.max_hotel_price_per_night is not None
+            else None,
+            min_hotel_stars=payload.min_hotel_stars,
+            preferred_departure_time_window=payload.preferred_departure_time_window,
+            preferred_return_time_window=payload.preferred_return_time_window,
+            is_active=True,
+            check_frequency_minutes=(
+                payload.check_frequency_minutes or settings.default_check_frequency_minutes
+            ),
+        )
+    )
 
 
 def serialize_search(row) -> dict:
@@ -124,40 +202,63 @@ def create_search(
     session: SessionDep,
     settings: SettingsDep,
 ) -> dict:
-    from datetime import date
-    from decimal import Decimal
-
-    user = UserRepository(session).get_or_create(payload.telegram_chat_id, payload.username)
-    row = TravelSearchRepository(session).add(
-        TravelSearch(
-            id=None,
-            user_id=user.id,
-            name=payload.name,
-            origin=payload.origin.upper(),
-            destination=payload.destination,
-            date_from=date.fromisoformat(payload.date_from),
-            date_to=date.fromisoformat(payload.date_to),
-            flexible_days=payload.flexible_days,
-            adults=payload.adults,
-            children=payload.children,
-            max_budget_total=Decimal(str(payload.max_budget_total)),
-            max_flight_price=Decimal(str(payload.max_flight_price))
-            if payload.max_flight_price is not None
-            else None,
-            max_hotel_price_per_night=Decimal(str(payload.max_hotel_price_per_night))
-            if payload.max_hotel_price_per_night is not None
-            else None,
-            min_hotel_stars=payload.min_hotel_stars,
-            preferred_departure_time_window=payload.preferred_departure_time_window,
-            preferred_return_time_window=payload.preferred_return_time_window,
-            is_active=True,
-            check_frequency_minutes=(
-                payload.check_frequency_minutes or settings.default_check_frequency_minutes
-            ),
-        )
-    )
+    row = persist_search(payload, session, settings)
     session.commit()
     return serialize_search(row)
+
+
+@router.post("/assistant/itinerary")
+async def assistant_itinerary(
+    payload: AssistantItineraryRequest,
+    session: SessionDep,
+    settings: SettingsDep,
+) -> dict:
+    plan = ItineraryAssistant().build_plan(payload.prompt)
+    response = serialize_plan(plan)
+    if not payload.create_search:
+        return response
+
+    draft = plan.draft
+    search_payload = TravelSearchCreate(
+        telegram_chat_id=payload.telegram_chat_id,
+        username=payload.username,
+        name=draft.name,
+        origin=draft.origin,
+        destination=draft.destination,
+        date_from=draft.date_from.isoformat(),
+        date_to=draft.date_to.isoformat(),
+        flexible_days=draft.flexible_days,
+        adults=draft.adults,
+        children=draft.children,
+        max_budget_total=draft.max_budget_total,
+        max_flight_price=draft.max_flight_price,
+        max_hotel_price_per_night=draft.max_hotel_price_per_night,
+        min_hotel_stars=draft.min_hotel_stars,
+        preferred_departure_time_window=draft.preferred_departure_time_window,
+        preferred_return_time_window=draft.preferred_return_time_window,
+    )
+    row = persist_search(search_payload, session, settings)
+    response["search"] = serialize_search(row)
+    if payload.run_check:
+        service = SearchService(
+            session,
+            MockFlightProvider(),
+            MockHotelProvider(),
+            DealEvaluator(settings),
+            notification_service=None,
+        )
+        candidate = await service.check_search(row, notify=False)
+        if candidate:
+            response["initial_check"] = {
+                "status": "checked",
+                "total_estimated_price": candidate.total_estimated_price,
+                "score": candidate.score,
+            }
+            return response
+
+    session.commit()
+    response["initial_check"] = {"status": "not_run" if not payload.run_check else "no_deals"}
+    return response
 
 
 @router.get("/searches/{search_id}")

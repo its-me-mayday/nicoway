@@ -95,7 +95,7 @@ def dashboard() -> str:
     button.primary:hover { background: var(--accent-strong); color: #fff; }
     button.danger { color: var(--danger); }
     label { display: grid; gap: 6px; color: var(--muted); font-size: 12px; }
-    input {
+    input, textarea {
       width: 100%;
       border: 1px solid var(--line);
       border-radius: 6px;
@@ -105,6 +105,7 @@ def dashboard() -> str:
       color: var(--ink);
       background: #fff;
     }
+    textarea { min-height: 132px; resize: vertical; }
     form { display: grid; gap: 12px; margin-top: 16px; }
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     .status {
@@ -165,6 +166,17 @@ def dashboard() -> str:
     .price { font-size: 22px; font-weight: 700; }
     .muted { color: var(--muted); }
     .empty { padding: 28px 18px; color: var(--muted); }
+    .assistant-result {
+      margin-top: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: #fbfaf7;
+      display: none;
+      gap: 10px;
+    }
+    .assistant-result ul { margin: 6px 0 0; padding-left: 18px; }
+    .assistant-result li { margin: 3px 0; }
     a { color: var(--accent-strong); text-decoration: none; }
     a:hover { text-decoration: underline; }
     .toast {
@@ -202,6 +214,14 @@ def dashboard() -> str:
 
   <main>
     <aside>
+      <h2>Brief naturale</h2>
+      <form id="assistantForm">
+        <label>Telegram chat id<input name="telegram_chat_id" required inputmode="numeric"></label>
+        <label>Indicazioni di viaggio<textarea name="prompt" required placeholder="Vorrei partire da Roma con Nicole per Edimburgo a fine agosto 2026, 2 adulti, budget 1800 euro. Hotel centrale romantico, esperienze belle ma senza correre."></textarea></label>
+        <button class="primary" type="submit">Interpreta e attiva</button>
+      </form>
+      <div id="assistantResult" class="assistant-result"></div>
+
       <h2>Nuova ricerca</h2>
       <form id="searchForm">
         <label>Telegram chat id<input name="telegram_chat_id" required inputmode="numeric"></label>
@@ -241,6 +261,15 @@ def dashboard() -> str:
     const searchesEl = document.querySelector("#searches");
     const countEl = document.querySelector("#count");
     const toastEl = document.querySelector("#toast");
+    const assistantResultEl = document.querySelector("#assistantResult");
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;");
+    }
 
     function money(value) {
       if (value === null || value === undefined) return "-";
@@ -361,6 +390,43 @@ def dashboard() -> str:
         });
         event.currentTarget.reset();
         toast("Ricerca creata.");
+        await render();
+      } catch (error) {
+        toast("Errore: " + error.message);
+      }
+    });
+
+    document.querySelector("#assistantForm").addEventListener("submit", async event => {
+      event.preventDefault();
+      const data = Object.fromEntries(new FormData(event.currentTarget).entries());
+      data.telegram_chat_id = Number(data.telegram_chat_id);
+      data.create_search = true;
+      data.run_check = true;
+      try {
+        const result = await request("/assistant/itinerary", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        });
+        const draft = result.draft;
+        const advice = result.advice;
+        assistantResultEl.style.display = "grid";
+        assistantResultEl.innerHTML = `
+          <div>
+            <h3>${escapeHtml(draft.name)}</h3>
+            <div class="meta">
+              <span>${escapeHtml(draft.origin)} → ${escapeHtml(draft.destination)}</span>
+              <span>${draft.date_from} / ${draft.date_to}</span>
+              <span>${money(draft.max_budget_total)}</span>
+            </div>
+          </div>
+          <div><strong>Hotel</strong><ul>${advice.hotel_strategy.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>
+          <div><strong>Esperienze</strong><ul>${advice.experiences.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>
+          <div><strong>Orari</strong><ul>${advice.timing.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>
+          <div><strong>Consiglio</strong><div class="muted">${escapeHtml(advice.booking_advice)}</div></div>
+          ${result.initial_check ? `<div><strong>Primo check</strong><div class="muted">${result.initial_check.status}${result.initial_check.score ? ` · score ${Math.round(result.initial_check.score)}/100 · ${money(result.initial_check.total_estimated_price)}` : ""}</div></div>` : ""}
+        `;
+        toast("Brief interpretato e ricerca attivata.");
         await render();
       } catch (error) {
         toast("Errore: " + error.message);
