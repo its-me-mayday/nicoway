@@ -16,6 +16,7 @@ class Settings(BaseSettings):
         default=180,
         alias="DEFAULT_CHECK_FREQUENCY_MINUTES",
     )
+    travelpayouts_token: str = Field(default="", alias="TRAVELPAYOUTS_TOKEN")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

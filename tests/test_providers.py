@@ -1,20 +1,25 @@
 from app.infrastructure.providers.flights.mock_provider import MockFlightProvider
-from app.infrastructure.providers.hotels.mock_provider import MockHotelProvider
 
 
-async def test_mock_flight_provider_returns_realistic_offers(sample_search):
+async def test_mock_flight_provider_returns_offers(sample_search):
     offers = await MockFlightProvider().search(sample_search)
 
-    assert len(offers) == 3
+    assert len(offers) == 4
     assert offers[0].origin == "FCO"
     assert offers[0].total_price > 0
-    assert offers[0].booking_url.startswith("https://example.com/flights/")
+    assert offers[0].booking_url.startswith("https://www.kayak.it/flights/")
+    assert offers[0].return_departure_datetime is None
 
 
-async def test_mock_hotel_provider_returns_realistic_offers(sample_search):
-    offers = await MockHotelProvider().search(sample_search)
+async def test_mock_flight_provider_direct_flights(sample_search):
+    offers = await MockFlightProvider().search(sample_search)
+    direct = [o for o in offers if o.stops == 0]
+    assert len(direct) >= 2
 
-    assert len(offers) == 3
-    assert offers[0].destination == "Edimburgo"
-    assert offers[0].total_price > offers[0].price_per_night
-    assert offers[0].rating >= 8
+
+async def test_mock_flight_provider_prices_scale_with_adults(sample_search):
+    sample_search.adults = 1
+    offers_1 = await MockFlightProvider().search(sample_search)
+    sample_search.adults = 2
+    offers_2 = await MockFlightProvider().search(sample_search)
+    assert offers_2[0].total_price == offers_1[0].total_price * 2

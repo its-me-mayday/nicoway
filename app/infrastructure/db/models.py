@@ -38,6 +38,21 @@ class UserORM(Base):
     searches: Mapped[list[TravelSearchORM]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
+    trips: Mapped[list[FlightTripORM]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+
+
+class FlightTripORM(Base):
+    __tablename__ = "flight_trips"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    user: Mapped[UserORM] = relationship(back_populates="trips")
+    searches: Mapped[list[TravelSearchORM]] = relationship(back_populates="trip")
 
 
 class TravelSearchORM(Base):
@@ -45,6 +60,9 @@ class TravelSearchORM(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    trip_id: Mapped[int | None] = mapped_column(
+        ForeignKey("flight_trips.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     name: Mapped[str] = mapped_column(String(255))
     origin: Mapped[str] = mapped_column(String(32))
     destination: Mapped[str] = mapped_column(String(128))
@@ -55,8 +73,7 @@ class TravelSearchORM(Base):
     children: Mapped[int] = mapped_column(Integer, default=0)
     max_budget_total: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     max_flight_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
-    max_hotel_price_per_night: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
-    min_hotel_stars: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_stops: Mapped[int] = mapped_column(Integer, default=0)
     preferred_departure_time_window: Mapped[str | None] = mapped_column(String(32), nullable=True)
     preferred_return_time_window: Mapped[str | None] = mapped_column(String(32), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
@@ -67,6 +84,7 @@ class TravelSearchORM(Base):
     )
 
     user: Mapped[UserORM] = relationship(back_populates="searches")
+    trip: Mapped[FlightTripORM | None] = relationship(back_populates="searches")
     snapshots: Mapped[list[DealSnapshotORM]] = relationship(
         back_populates="search", cascade="all, delete-orphan"
     )
@@ -81,31 +99,14 @@ class FlightOfferORM(Base):
     destination: Mapped[str] = mapped_column(String(128))
     departure_datetime: Mapped[datetime] = mapped_column(DateTime)
     arrival_datetime: Mapped[datetime] = mapped_column(DateTime)
-    return_departure_datetime: Mapped[datetime] = mapped_column(DateTime)
-    return_arrival_datetime: Mapped[datetime] = mapped_column(DateTime)
+    return_departure_datetime: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    return_arrival_datetime: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     total_price: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     currency: Mapped[str] = mapped_column(String(3), default="EUR")
     stops: Mapped[int] = mapped_column(Integer, default=0)
     duration_minutes: Mapped[int] = mapped_column(Integer)
     booking_url: Mapped[str] = mapped_column(Text)
-    raw_payload: Mapped[dict[str, Any] | None] = mapped_column(json_type, nullable=True)
-
-
-class HotelOfferORM(Base):
-    __tablename__ = "hotel_offers"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    provider: Mapped[str] = mapped_column(String(100))
-    hotel_name: Mapped[str] = mapped_column(String(255))
-    destination: Mapped[str] = mapped_column(String(128))
-    checkin_date: Mapped[date] = mapped_column(Date)
-    checkout_date: Mapped[date] = mapped_column(Date)
-    price_per_night: Mapped[Decimal] = mapped_column(Numeric(10, 2))
-    total_price: Mapped[Decimal] = mapped_column(Numeric(10, 2))
-    currency: Mapped[str] = mapped_column(String(3), default="EUR")
-    stars: Mapped[int] = mapped_column(Integer)
-    rating: Mapped[float] = mapped_column(Numeric(3, 1))
-    booking_url: Mapped[str] = mapped_column(Text)
+    airline: Mapped[str | None] = mapped_column(String(10), nullable=True)
     raw_payload: Mapped[dict[str, Any] | None] = mapped_column(json_type, nullable=True)
 
 
@@ -115,10 +116,8 @@ class DealSnapshotORM(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     search_id: Mapped[int] = mapped_column(ForeignKey("travel_searches.id", ondelete="CASCADE"))
     flight_offer_id: Mapped[int | None] = mapped_column(
-        ForeignKey("flight_offers.id"),
-        nullable=True,
+        ForeignKey("flight_offers.id"), nullable=True
     )
-    hotel_offer_id: Mapped[int | None] = mapped_column(ForeignKey("hotel_offers.id"), nullable=True)
     total_estimated_price: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     score: Mapped[float] = mapped_column(Numeric(5, 2))
     is_notified: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -126,7 +125,6 @@ class DealSnapshotORM(Base):
 
     search: Mapped[TravelSearchORM] = relationship(back_populates="snapshots")
     flight_offer: Mapped[FlightOfferORM | None] = relationship()
-    hotel_offer: Mapped[HotelOfferORM | None] = relationship()
 
 
 class NotificationLogORM(Base):

@@ -16,6 +16,7 @@ def test_telegram_main_commands_are_registered():
         "start",
         "help",
         "searches",
+        "trips",
         "enable",
         "disable",
         "delete",
@@ -24,4 +25,4 @@ def test_telegram_main_commands_are_registered():
         "settings",
     }
     assert expected <= commands
-    assert any(isinstance(handler, ConversationHandler) for handler in handlers)
+    assert sum(isinstance(h, ConversationHandler) for h in handlers) == 2

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from app.config import Settings
-from app.domain.models import FlightOffer, HotelOffer, TravelSearch
+from app.domain.models import FlightOffer, TravelSearch
 from app.domain.scoring import score_deal
 
 
@@ -12,7 +12,6 @@ from app.domain.scoring import score_deal
 class DealCandidate:
     search: TravelSearch
     flight: FlightOffer
-    hotel: HotelOffer
     total_estimated_price: Decimal
     score: float
     previous_best_price: Decimal | None
@@ -22,10 +21,8 @@ class DealCandidate:
     def price_improvement_percent(self) -> float:
         if not self.previous_best_price or self.previous_best_price <= 0:
             return 0
-        improvement_ratio = (
-            self.previous_best_price - self.total_estimated_price
-        ) / self.previous_best_price
-        return round(float(improvement_ratio) * 100, 2)
+        ratio = (self.previous_best_price - self.total_estimated_price) / self.previous_best_price
+        return round(float(ratio) * 100, 2)
 
     @property
     def score_improvement(self) -> float:
@@ -42,17 +39,14 @@ class DealEvaluator:
         self,
         search: TravelSearch,
         flight: FlightOffer,
-        hotel: HotelOffer,
         previous_best_price: Decimal | None,
         previous_best_score: float | None,
     ) -> DealCandidate:
-        total = flight.total_price + hotel.total_price
         return DealCandidate(
             search=search,
             flight=flight,
-            hotel=hotel,
-            total_estimated_price=total,
-            score=score_deal(search, flight, hotel, previous_best_price),
+            total_estimated_price=flight.total_price,
+            score=score_deal(search, flight, previous_best_price),
             previous_best_price=previous_best_price,
             previous_best_score=previous_best_score,
         )
@@ -63,5 +57,5 @@ class DealEvaluator:
             candidate.price_improvement_percent >= self.settings.min_price_improvement_percent
         )
         score_improved = candidate.score_improvement >= self.settings.min_score_improvement
-        first_good_snapshot = candidate.previous_best_price is None and under_budget
-        return first_good_snapshot or under_budget or price_improved or score_improved
+        first_good = candidate.previous_best_price is None and under_budget
+        return first_good or under_budget or price_improved or score_improved

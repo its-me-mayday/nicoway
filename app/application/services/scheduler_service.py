@@ -11,7 +11,7 @@ from app.config import Settings
 from app.infrastructure.db.repositories import NotificationRepository, TravelSearchRepository
 from app.infrastructure.db.session import SessionLocal
 from app.infrastructure.providers.flights.mock_provider import MockFlightProvider
-from app.infrastructure.providers.hotels.mock_provider import MockHotelProvider
+from app.infrastructure.providers.flights.travelpayouts_provider import TravelpayoutsFlightProvider
 
 logger = logging.getLogger(__name__)
 
@@ -38,15 +38,21 @@ class SchedulerService:
     async def run_once(self) -> None:
         with SessionLocal() as session:
             searches = TravelSearchRepository(session).list_active()
+            if searches:
+                logger.info("⏱ Scheduler: %d tratt%s attiv%s", len(searches), "a" if len(searches)==1 else "e", "a" if len(searches)==1 else "e")
             for search in searches:
                 try:
                     notification_service = NotificationService(
                         self.settings, NotificationRepository(session)
                     )
+                    provider = (
+                        TravelpayoutsFlightProvider(self.settings.travelpayouts_token)
+                        if self.settings.travelpayouts_token
+                        else MockFlightProvider()
+                    )
                     service = SearchService(
                         session=session,
-                        flight_provider=MockFlightProvider(),
-                        hotel_provider=MockHotelProvider(),
+                        flight_provider=provider,
                         evaluator=DealEvaluator(self.settings),
                         notification_service=notification_service,
                     )

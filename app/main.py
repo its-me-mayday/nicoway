@@ -10,6 +10,7 @@ from app.api.routes import router
 from app.application.services.scheduler_service import SchedulerService
 from app.config import get_settings
 from app.infrastructure.telegram.bot import TelegramBotRunner
+from app import log_buffer
 
 
 class SecretRedactionFilter(logging.Filter):
@@ -36,7 +37,7 @@ def configure_logging() -> None:
     logging.basicConfig(level=settings.log_level)
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
-    redaction_filter = SecretRedactionFilter([settings.telegram_bot_token])
+    redaction_filter = SecretRedactionFilter([settings.telegram_bot_token, settings.travelpayouts_token])
     root_logger = logging.getLogger()
     root_logger.addFilter(redaction_filter)
     for handler in root_logger.handlers:
@@ -46,6 +47,7 @@ def configure_logging() -> None:
         logger.addFilter(redaction_filter)
         for handler in logger.handlers:
             handler.addFilter(redaction_filter)
+    log_buffer.install(root_logger)
 
 
 @asynccontextmanager

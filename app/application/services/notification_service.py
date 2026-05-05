@@ -32,33 +32,38 @@ class NotificationService:
 
     def render_deal_message(self, candidate: DealCandidate) -> str:
         flight = candidate.flight
-        hotel = candidate.hotel
         improvement = candidate.price_improvement_percent
         improvement_line = (
-            f"📉 Miglioramento: -{abs(improvement):.0f}% rispetto al miglior prezzo precedente"
+            f"📉 -{abs(improvement):.0f}% rispetto al miglior prezzo precedente"
             if improvement > 0
-            else "📉 Primo buon riferimento salvato per questa ricerca"
+            else "📌 Primo prezzo di riferimento salvato"
         )
-        return (
-            f"🚀 Nuovo deal trovato per {candidate.search.name}!\n\n"
-            "✈️ Volo:\n"
-            f"{flight.origin} → {flight.destination}\n"
-            f"Partenza: {flight.departure_datetime:%d/%m/%Y %H:%M}\n"
-            f"Ritorno: {flight.return_departure_datetime:%d/%m/%Y %H:%M}\n"
-            f"Prezzo: {eur(flight.total_price)}\n"
-            f"Scali: {flight.stops}\n\n"
-            "🏨 Hotel:\n"
-            f"{hotel.hotel_name}\n"
-            f"Prezzo medio/notte: {eur(hotel.price_per_night)}\n"
-            f"Totale stimato hotel: {eur(hotel.total_price)}\n"
-            f"Rating medio: {hotel.rating:.1f}\n\n"
-            f"💰 Totale stimato: {eur(candidate.total_estimated_price)}\n"
-            f"{improvement_line}\n"
-            f"⭐ Score: {candidate.score:.0f}/100\n\n"
-            f"🔗 Prenota volo: {flight.booking_url}\n"
-            f"🔗 Cerca hotel: {hotel.booking_url}\n\n"
-            "Sembra una piccola finestra buona per voi due."
+        stops_label = (
+            "diretto" if flight.stops == 0
+            else f"{flight.stops} scal{'o' if flight.stops == 1 else 'i'}"
         )
+        lines = [
+            f"✈️ Volo trovato per {candidate.search.name}!",
+            "",
+            f"{flight.origin} → {flight.destination}",
+            f"Partenza: {flight.departure_datetime:%d/%m/%Y %H:%M}",
+            f"Arrivo: {flight.arrival_datetime:%d/%m/%Y %H:%M}",
+        ]
+        if flight.return_departure_datetime:
+            lines += [
+                f"Ritorno: {flight.return_departure_datetime:%d/%m/%Y %H:%M}",
+            ]
+        lines += [
+            f"Prezzo: {eur(flight.total_price)} · {stops_label}",
+            f"Durata: {flight.duration_minutes // 60}h{flight.duration_minutes % 60:02d}m",
+            "",
+            f"💰 {eur(candidate.total_estimated_price)}",
+            improvement_line,
+            f"⭐ Score: {candidate.score:.0f}/100",
+            "",
+            f"🔗 {flight.booking_url}",
+        ]
+        return "\n".join(lines)
 
     async def send_deal(self, chat_id: int, user_id: int, candidate: DealCandidate) -> bool:
         message = self.render_deal_message(candidate)

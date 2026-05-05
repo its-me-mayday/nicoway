@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime, time, timedelta
 from decimal import Decimal
 
 from app.domain.models import FlightOffer, TravelSearch
 from app.infrastructure.providers.flights.base import FlightProvider
+
+
+def _route_factor(origin: str, destination: str) -> float:
+    """Deterministic price multiplier per route (0.5x – 2.5x base price)."""
+    digest = hashlib.md5(f"{origin}{destination}".encode()).digest()
+    return 0.5 + (digest[0] / 255) * 2.0
 
 
 class MockFlightProvider(FlightProvider):
@@ -14,17 +21,22 @@ class MockFlightProvider(FlightProvider):
         base_date = search.date_from
         destination_code = search.destination[:3].upper()
         origin = search.origin.upper()
-        offers: list[FlightOffer] = []
+        factor = Decimal(str(round(_route_factor(origin, destination_code), 2)))
+
         templates = [
-            (time(8, 20), time(11, 15), time(19, 10), time(22, 0), Decimal("142"), 0, 175),
-            (time(6, 45), time(12, 30), time(17, 25), time(23, 10), Decimal("118"), 1, 345),
-            (time(14, 10), time(17, 0), time(9, 35), time(12, 20), Decimal("189"), 0, 170),
+            (time(8, 20),  time(11, 15), Decimal("142"), 0, 175, "FR"),
+            (time(6, 45),  time(12, 30), Decimal("118"), 1, 345, "U2"),
+            (time(14, 10), time(17, 0),  Decimal("189"), 0, 170, "AZ"),
+            (time(7, 0),   time(9, 45),  Decimal("205"), 2, 420, "W6"),
         ]
-        for idx, item in enumerate(templates):
-            dep_t, arr_t, ret_dep_t, ret_arr_t, price, stops, duration = item
+        offers: list[FlightOffer] = []
+        for idx, (dep_t, arr_t, base_price, stops, duration, airline) in enumerate(templates):
             outbound = datetime.combine(base_date + timedelta(days=idx % 2), dep_t)
-            ret_date = search.date_to - timedelta(days=idx % 2)
-            booking_url = f"https://example.com/flights/{origin}-{destination_code}-{idx + 1}"
+            price = (base_price * factor).quantize(Decimal("1"))
+            booking_url = (
+                f"https://www.kayak.it/flights/{origin}-{destination_code}"
+                f"/{outbound.strftime('%Y-%m-%d')}/{search.adults}adults"
+            )
             offers.append(
                 FlightOffer(
                     id=None,
@@ -33,13 +45,14 @@ class MockFlightProvider(FlightProvider):
                     destination=destination_code,
                     departure_datetime=outbound,
                     arrival_datetime=datetime.combine(outbound.date(), arr_t),
-                    return_departure_datetime=datetime.combine(ret_date, ret_dep_t),
-                    return_arrival_datetime=datetime.combine(ret_date, ret_arr_t),
+                    return_departure_datetime=None,
+                    return_arrival_datetime=None,
                     total_price=price * search.adults,
                     currency="EUR",
                     stops=stops,
                     duration_minutes=duration,
                     booking_url=booking_url,
+                    airline=airline,
                     raw_payload={"mock_rank": idx + 1},
                 )
             )
